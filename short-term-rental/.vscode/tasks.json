@@ -1,0 +1,271 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "build",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"build",
+				"short-term-rental.sln",
+				"-c",
+				"Release"
+			],
+			"problemMatcher": [
+				"$msCompile"
+			],
+			"group": "build"
+		},
+		{
+			"label": "verify concurrency",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"run",
+				"--project",
+				"src\\ShortTermRental.Simulator",
+				"-c",
+				"Release",
+				"--no-build",
+				"--",
+				"verify"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "verify multi-instance",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"run",
+				"--project",
+				"src\\ShortTermRental.Simulator",
+				"-c",
+				"Release",
+				"--no-build",
+				"--",
+				"verify",
+				"--second-url",
+				"http://localhost:58081",
+				"--attempts",
+				"1000",
+				"--concurrency",
+				"64"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "verify service failures",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-File",
+				"scripts\\Test-Failures.ps1"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "load catalog",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"run",
+				"--project",
+				"src\\ShortTermRental.Simulator",
+				"-c",
+				"Release",
+				"--no-build",
+				"--",
+				"load",
+				"--duration",
+				"20",
+				"--concurrency",
+				"32",
+				"--read-percent",
+				"90",
+				"--hotspot-percent",
+				"10",
+				"--read-mode",
+				"catalog"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "load availability",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"run",
+				"--project",
+				"src\\ShortTermRental.Simulator",
+				"-c",
+				"Release",
+				"--no-build",
+				"--",
+				"load",
+				"--duration",
+				"20",
+				"--concurrency",
+				"32",
+				"--read-percent",
+				"90",
+				"--hotspot-percent",
+				"10",
+				"--read-mode",
+				"availability"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "load writes",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"run",
+				"--project",
+				"src\\ShortTermRental.Simulator",
+				"-c",
+				"Release",
+				"--no-build",
+				"--",
+				"load",
+				"--duration",
+				"20",
+				"--concurrency",
+				"32",
+				"--read-percent",
+				"0",
+				"--hotspot-percent",
+				"0"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "load 100 mixed",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"run",
+				"--project",
+				"src\\ShortTermRental.Simulator",
+				"-c",
+				"Release",
+				"--no-build",
+				"--",
+				"load",
+				"--duration",
+				"30",
+				"--concurrency",
+				"100",
+				"--read-percent",
+				"90",
+				"--hotspot-percent",
+				"10",
+				"--read-mode",
+				"catalog"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "load 100 writes",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"run",
+				"--project",
+				"src\\ShortTermRental.Simulator",
+				"-c",
+				"Release",
+				"--no-build",
+				"--",
+				"load",
+				"--duration",
+				"30",
+				"--concurrency",
+				"100",
+				"--read-percent",
+				"0",
+				"--hotspot-percent",
+				"0"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "pool50 load80 writes",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"run",
+				"--project",
+				"src\\ShortTermRental.Simulator",
+				"-c",
+				"Release",
+				"--no-build",
+				"--",
+				"load",
+				"--duration",
+				"30",
+				"--concurrency",
+				"80",
+				"--read-percent",
+				"0",
+				"--hotspot-percent",
+				"0"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "pool50 load100 mixed",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"run",
+				"--project",
+				"src\\ShortTermRental.Simulator",
+				"-c",
+				"Release",
+				"--no-build",
+				"--",
+				"load",
+				"--duration",
+				"30",
+				"--concurrency",
+				"100",
+				"--read-percent",
+				"90",
+				"--hotspot-percent",
+				"10",
+				"--read-mode",
+				"catalog"
+			],
+			"problemMatcher": []
+		},
+		{
+			"label": "pool50 load200 reads",
+			"type": "shell",
+			"command": "dotnet",
+			"args": [
+				"run",
+				"--project",
+				"src\\ShortTermRental.Simulator",
+				"-c",
+				"Release",
+				"--no-build",
+				"--",
+				"load",
+				"--duration",
+				"30",
+				"--concurrency",
+				"200",
+				"--read-percent",
+				"100",
+				"--hotspot-percent",
+				"0",
+				"--read-mode",
+				"catalog"
+			],
+			"problemMatcher": []
+		}
+	]
+}
