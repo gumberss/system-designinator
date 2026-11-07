@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111827">
+  <title>ai-chatinator</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main id="auth-screen" class="auth-screen" hidden>
+    <section class="auth-card">
+      <a class="brand" href="/" aria-label="ai-chatinator home"><span class="brand-mark">✳</span> ai-chatinator</a>
+      <p class="eyebrow">YOUR PRIVATE WORKSPACE</p>
+      <h1 id="auth-title">Welcome back</h1>
+      <p id="auth-subtitle" class="muted">Sign in to pick up where you left off.</p>
+      <form id="auth-form">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="email" required maxlength="254">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" minlength="10" maxlength="128" required>
+        <button id="auth-submit" class="primary-button wide" type="submit">Sign in</button>
+      </form>
+      <p class="auth-switch"><span id="auth-switch-prompt">New here?</span> <button id="auth-switch" class="text-button" type="button">Create an account</button></p>
+      <p id="auth-error" class="error-text" role="alert"></p>
+      <p class="local-note">Local demo · Your data stays on this machine</p>
+    </section>
+  </main>
+
+  <main id="app-screen" class="app-shell" hidden>
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-top">
+        <a class="brand" href="/" aria-label="ai-chatinator home"><span class="brand-mark">✳</span> ai-chatinator</a>
+        <button id="new-chat" class="new-chat-button" type="button"><span>＋</span> New chat</button>
+      </div>
+      <div class="history-heading">YOUR CHATS</div>
+      <nav id="conversation-list" class="conversation-list" aria-label="Conversations"></nav>
+      <div class="sidebar-bottom">
+        <div class="credits-card"><span class="credit-dot"></span><span><strong id="credit-count">—</strong> local credits</span></div>
+        <div class="profile-row">
+          <div class="avatar" id="profile-avatar">A</div>
+          <div class="profile-copy"><strong id="profile-email">—</strong><span>Local account</span></div>
+          <button id="logout" class="icon-button" type="button" aria-label="Sign out" title="Sign out">↗</button>
+        </div>
+      </div>
+    </aside>
+
+    <section class="chat-panel">
+      <header class="topbar">
+        <button id="mobile-menu" class="icon-button mobile-menu" type="button" aria-label="Toggle conversation list">☰</button>
+        <div class="model-badge"><span class="model-dot"></span> Local demo <span class="chevron">⌄</span></div>
+        <div class="topbar-actions"><button id="share-chat" class="secondary-button" type="button" disabled><span>↗</span> Share</button></div>
+      </header>
+
+      <section id="welcome" class="welcome">
+        <div class="welcome-orb">✳</div>
+        <p class="eyebrow">A THOUGHTFUL SPACE TO THINK</p>
+        <h1>What’s on your mind?</h1>
+        <p class="muted">Start a conversation. Your messages are saved locally on this machine.</p>
+        <div class="suggestions">
+          <button class="suggestion" type="button" data-prompt="Help me break down a complex problem into smaller steps."><span>↗</span><strong>Untangle a problem</strong><small>Break a big question into clear steps</small></button>
+          <button class="suggestion" type="button" data-prompt="Help me draft a concise project plan with milestones."><span>▤</span><strong>Make a plan</strong><small>Turn an idea into a practical next step</small></button>
+          <button class="suggestion" type="button" data-prompt="Explain a tricky concept in simple terms."><span>⌘</span><strong>Learn something</strong><small>Get a clear, beginner-friendly explanation</small></button>
+          <button class="suggestion" type="button" data-prompt="Give me a few creative ideas for a weekend project."><span>✳</span><strong>Find inspiration</strong><small>Explore a few fresh directions</small></button>
+        </div>
+      </section>
+
+      <section id="message-list" class="message-list" aria-live="polite"></section>
+      <div id="chat-footer" class="chat-footer">
+        <form id="composer" class="composer">
+          <div id="attachment-list" class="attachment-list" aria-live="polite"></div>
+          <textarea id="message-input" rows="1" maxlength="6000" placeholder="Message ai-chatinator…" aria-label="Message"></textarea>
+          <div class="composer-bottom"><span><label class="attach-button" for="file-input">＋ Attach file</label><input id="file-input" type="file" accept=".txt,.md,.pdf,text/plain,text/markdown,application/pdf"><span> · Enter to send · Shift + Enter for a new line</span></span><button id="send-button" class="send-button" type="submit" aria-label="Send message" disabled>↑</button></div>
+        </form>
+        <p class="disclaimer">Local demo provider · Not connected to an external AI model</p>
+      </div>
+    </section>
+    <div id="toast" class="toast" role="status"></div>
+  </main>
+</body>
+</html>

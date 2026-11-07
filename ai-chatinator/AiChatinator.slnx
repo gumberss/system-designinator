@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/infra/">
+    <Project Path="infra/AiChatinator.Cdk/AiChatinator.Cdk.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/AiChatinator.Api/AiChatinator.Api.csproj" />
+    <Project Path="src/AiChatinator.Application/AiChatinator.Application.csproj" />
+    <Project Path="src/AiChatinator.Domain/AiChatinator.Domain.csproj" />
+    <Project Path="src/AiChatinator.Infrastructure/AiChatinator.Infrastructure.csproj" />
+    <Project Path="src/AiChatinator.Llm/AiChatinator.Llm.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AiChatinator.Tests/AiChatinator.Tests.csproj" />
+  </Folder>
+</Solution>

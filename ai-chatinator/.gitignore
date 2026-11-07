@@ -1,0 +1,10 @@
+src/AiChatinator.Api/App_Data/
+.env
+.env.*
+!.env.example
+**/bin/
+**/obj/
+**/cdk.out/
+**/node_modules/
+**/wwwroot/client/
+.vs/
