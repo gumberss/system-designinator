@@ -1,0 +1,10 @@
+fastapi<1.0,>=0.115
+httpx<1.0,>=0.28
+PyJWT<3.0,>=2.10
+aiokafka<1.0,>=0.12
+psycopg[binary]<4.0,>=3.2
+SQLAlchemy<3.0,>=2.0
+uvicorn[standard]<1.0,>=0.34
+
+[dev]
+pytest<9.0,>=8.3

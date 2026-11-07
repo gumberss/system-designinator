@@ -1,0 +1,290 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: travel
+      POSTGRES_PASSWORD: local-only-change-me
+      POSTGRES_DB: postgres
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - marketplace-postgres:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U travel -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.3.15
+    command:
+      - redpanda
+      - start
+      - --mode
+      - dev-container
+      - --smp
+      - "1"
+      - --memory
+      - 1G
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "127.0.0.1:19092:19092"
+      - "127.0.0.1:19644:9644"
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health", "--brokers", "localhost:9092"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  opensearch:
+    image: opensearchproject/opensearch:2.19.1
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - "127.0.0.1:19200:9200"
+    volumes:
+      - marketplace-opensearch:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:9200/_cluster/health?wait_for_status=yellow'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  qdrant:
+    image: qdrant/qdrant:v1.13.4
+    ports:
+      - "127.0.0.1:16333:6333"
+    volumes:
+      - marketplace-qdrant:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  identity:
+    build: .
+    command: ["uvicorn", "services.identity.app:app", "--host", "0.0.0.0", "--port", "8001"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://travel:local-only-change-me@postgres/identity
+      JWT_SECRET: ${JWT_SECRET:-local-only-change-this-secret}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  destination:
+    build: .
+    command: ["uvicorn", "services.destination.app:app", "--host", "0.0.0.0", "--port", "8002"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://travel:local-only-change-me@postgres/destination
+      JWT_SECRET: ${JWT_SECRET:-local-only-change-this-secret}
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  flight:
+    build: .
+    command: ["uvicorn", "services.flight.app:app", "--host", "0.0.0.0", "--port", "8003"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://travel:local-only-change-me@postgres/flight
+      JWT_SECRET: ${JWT_SECRET:-local-only-change-this-secret}
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  hotel:
+    build: .
+    command: ["uvicorn", "services.hotel.app:app", "--host", "0.0.0.0", "--port", "8004"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://travel:local-only-change-me@postgres/hotel
+      JWT_SECRET: ${JWT_SECRET:-local-only-change-this-secret}
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  activities:
+    build: .
+    command: ["uvicorn", "services.activities.app:app", "--host", "0.0.0.0", "--port", "8005"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://travel:local-only-change-me@postgres/activities
+      JWT_SECRET: ${JWT_SECRET:-local-only-change-this-secret}
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8005/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  payment:
+    build: .
+    command: ["uvicorn", "services.payment.app:app", "--host", "0.0.0.0", "--port", "8007"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://travel:local-only-change-me@postgres:5432/payment
+      PAYMENT_SIMULATOR_MODE: ${PAYMENT_SIMULATOR_MODE:-normal}
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8007/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  booking:
+    build: .
+    command: ["uvicorn", "services.booking.app:app", "--host", "0.0.0.0", "--port", "8006"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://travel:local-only-change-me@postgres:5432/booking
+      JWT_SECRET: ${JWT_SECRET:-local-only-change-this-secret}
+      FLIGHT_URL: http://flight:8003
+      HOTEL_URL: http://hotel:8004
+      ACTIVITIES_URL: http://activities:8005
+      PAYMENT_URL: http://payment:8007
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      flight:
+        condition: service_healthy
+      hotel:
+        condition: service_healthy
+      activities:
+        condition: service_healthy
+      payment:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8006/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  gateway:
+    build: .
+    command: ["uvicorn", "services.gateway.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      IDENTITY_URL: http://identity:8001
+      DESTINATION_URL: http://destination:8002
+      FLIGHT_URL: http://flight:8003
+      HOTEL_URL: http://hotel:8004
+      ACTIVITIES_URL: http://activities:8005
+      BOOKING_URL: http://booking:8006
+      SEARCH_URL: http://search:8008
+      AI_GATEWAY_URL: http://ai_gateway:8009
+    ports:
+      - "127.0.0.1:58080:8000"
+    depends_on:
+      identity:
+        condition: service_healthy
+      destination:
+        condition: service_healthy
+      flight:
+        condition: service_healthy
+      hotel:
+        condition: service_healthy
+      activities:
+        condition: service_healthy
+      booking:
+        condition: service_healthy
+      search:
+        condition: service_healthy
+      ai_gateway:
+        condition: service_healthy
+
+  search:
+    build: .
+    command: ["uvicorn", "services.search.app:app", "--host", "0.0.0.0", "--port", "8008"]
+    environment:
+      DATABASE_URL: "******postgres:5432/search"
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      OPENSEARCH_URL: http://opensearch:9200
+      SEARCH_ADMIN_TOKEN: ${SEARCH_ADMIN_TOKEN:-local-only-search-admin-token}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8008/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  ai_gateway:
+    build: .
+    command: ["uvicorn", "services.ai_gateway.app:app", "--host", "0.0.0.0", "--port", "8009"]
+    environment:
+      DATABASE_URL: "******postgres:5432/assistant"
+      JWT_SECRET: ${JWT_SECRET:-local-only-change-this-secret}
+      SEARCH_URL: http://search:8008
+      BOOKING_URL: http://booking:8006
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-4.1-mini}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      OPENAI_EMBEDDING_DIMENSIONS: ${OPENAI_EMBEDDING_DIMENSIONS:-1536}
+      QDRANT_URL: http://qdrant:6333
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8009/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  marketplace-postgres:
+  marketplace-opensearch:
+  marketplace-qdrant:

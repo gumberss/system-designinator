@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://system-designinator.local/contracts/events/event-envelope.v1.schema.json",
+  "title": "Marketplace event envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "schema_version",
+    "aggregate_type",
+    "aggregate_id",
+    "aggregate_version",
+    "occurred_at",
+    "producer",
+    "causation_id",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 36
+    },
+    "event_type": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "aggregate_type": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "aggregate_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180
+    },
+    "aggregate_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "producer": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "causation_id": {
+      "type": ["string", "null"],
+      "maxLength": 180
+    },
+    "payload": {
+      "type": "object"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "ride-hailing-lab",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/runtime/server.js",
+    "dev": "docker compose up -d --build",
+    "test": "npm run build && node --test dist/tests/domain.test.js dist/tests/quadtree.test.js",
+    "test:integration": "npm run build && node --test dist/tests/integration.test.js",
+    "simulate": "node dist/tools/simulator.js"
+  },
+  "dependencies": {
+    "express": "^5.3.0",
+    "pg": "^8.23.1",
+    "ioredis": "^5.8.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "typescript": "^7.0.2"
+  }
+}

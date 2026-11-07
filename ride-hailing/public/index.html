@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Ride-hailing | laboratorio de system design</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header><span>LAB / SYSTEM DESIGN</span><h1>Uma corrida, do matching ao encontro.</h1>
+    <p>Redis recebe GPS. Quadtree encontra candidatos. PostgreSQL confirma o motorista. SSE acompanha o trajeto.</p></header>
+  <main>
+    <section class="card controls">
+      <h2>Solicitar corrida</h2>
+      <label>Passageiro<select id="passenger"></select></label>
+      <label>Categoria<select id="category"><option value="standard">Standard</option><option value="comfort">Comfort</option></select></label>
+      <fieldset><legend>Embarque</legend>
+        <label>Latitude<input id="pickupLat" type="number" step="0.0001" value="-23.5614"></label>
+        <label>Longitude<input id="pickupLng" type="number" step="0.0001" value="-46.6559"></label>
+      </fieldset>
+      <fieldset><legend>Destino</legend>
+        <label>Latitude<input id="destinationLat" type="number" step="0.0001" value="-23.5680"></label>
+        <label>Longitude<input id="destinationLng" type="number" step="0.0001" value="-46.6480"></label>
+      </fieldset>
+      <button id="request">Chamar motorista / repetir pedido</button>
+      <div class="actions"><button id="start" disabled>Iniciar viagem</button><button id="cancel" disabled>Cancelar</button></div>
+      <button id="new" class="secondary">Preparar nova viagem</button>
+      <p class="hint">Execute <code>npm run simulate</code> para publicar GPS e mover os motoristas.
+        GPS a cada ~4s; quadtree e persistencia em lotes de ~15s.
+        Sem heartbeat, motoristas saem da busca em 15s. Movimento de 120m/tick, em linha reta.</p>
+      <p class="hint" id="pipeline">Carregando estado do indice...</p>
+    </section>
+    <section class="card map-card">
+      <div class="map-title"><h2>Visao da regiao</h2><span id="connection">Sem corrida selecionada</span></div>
+      <svg id="map" viewBox="0 0 760 470" role="img" aria-label="Diagrama geografico dos motoristas, embarque e destino">
+        <defs><pattern id="grid" width="38" height="38" patternUnits="userSpaceOnUse"><path d="M 38 0 L 0 0 0 38" fill="none" stroke="#dae1e8"></path></pattern></defs>
+        <rect width="760" height="470" fill="url(#grid)"></rect><g id="markers"></g>
+      </svg>
+      <p class="hint">Diagrama latitude/longitude, sem mapa de ruas nem API externa.
+        Azul: disponivel · laranja: escolhido · verde: embarque · roxo: destino · turquesa: passageiro.</p>
+      <p id="nearby">Carregando motoristas...</p>
+    </section>
+    <section class="card"><h2>Decisao do sistema</h2><pre id="trip">Nenhuma corrida.</pre>
+      <p>Regra: mesma categoria, GPS recente, raio de 5km e menor distancia geodesica.
+        Empate por ID. Motorista bloqueado por outra transacao pode ser pulado.</p>
+    </section>
+    <section class="card"><h2>Eventos recebidos</h2><ol id="events" aria-live="polite"></ol></section>
+    <section class="card"><h2>Rota persistida</h2>
+      <button id="route" class="secondary">Consultar trajeto salvo</button>
+      <pre id="routeResult">GPS ao vivo e historico duravel sao caminhos separados. O historico aparece apos o lote.</pre>
+    </section>
+    <p id="error" role="alert"></p>
+  </main>
+  <footer>Laboratorio local sem login, cobranca ou navegacao real. Nao publicar na Internet.</footer>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

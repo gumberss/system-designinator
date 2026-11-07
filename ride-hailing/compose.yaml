@@ -1,0 +1,135 @@
+name: ride-hailing
+
+x-app: &app
+  image: ride-hailing-services:local
+  build: .
+  init: true
+  restart: unless-stopped
+  environment: &env
+    HOST: 0.0.0.0
+    DATABASE_URL: postgres://rides:local-development-only@postgres:5432/rides
+    REDIS_URL: redis://redis:6379
+    TRIP_URL: http://trip-manager:58110
+    LOCATION_URL: http://location-manager:58120
+    MAP_URL: http://quadtree-map:58130
+    FINDER_URL: http://find-driver:58140
+  depends_on:
+    redis:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/health/ready',{signal:AbortSignal.timeout(6000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+    interval: 15s
+    timeout: 8s
+    start_period: 30s
+    retries: 5
+
+services:
+  postgres:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_DB: rides
+      POSTGRES_USER: rides
+      POSTGRES_PASSWORD: local-development-only
+    ports:
+      - "127.0.0.1:55439:5432"
+    volumes:
+      - ride-data:/var/lib/postgresql/data
+      - ./infra/001-schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rides -d rides"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    ports:
+      - "127.0.0.1:56379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  trip-manager:
+    <<: *app
+    environment:
+      <<: *env
+      SERVICE: trip-manager
+      PORT: 58110
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+  location-manager:
+    <<: *app
+    environment:
+      <<: *env
+      SERVICE: location-manager
+      PORT: 58120
+  quadtree-map:
+    <<: *app
+    environment:
+      <<: *env
+      SERVICE: quadtree-map
+      PORT: 58130
+  find-driver:
+    <<: *app
+    environment:
+      <<: *env
+      SERVICE: find-driver
+      PORT: 58140
+  request-vehicle:
+    <<: *app
+    environment:
+      <<: *env
+      SERVICE: request-vehicle
+      PORT: 58150
+  request-vehicle-2:
+    <<: *app
+    environment:
+      <<: *env
+      SERVICE: request-vehicle
+      PORT: 58150
+  location-writer:
+    <<: *app
+    environment:
+      <<: *env
+      SERVICE: location-writer
+      PORT: 58160
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+  gateway:
+    image: nginx:1.28-alpine
+    ports:
+      - "127.0.0.1:58100:8080"
+    volumes:
+      - ./infra/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./public:/usr/share/nginx/html:ro
+    depends_on:
+      request-vehicle:
+        condition: service_healthy
+      request-vehicle-2:
+        condition: service_healthy
+      location-writer:
+        condition: service_healthy
+  gateway-2:
+    profiles: ["multi-instance"]
+    image: nginx:1.28-alpine
+    ports:
+      - "127.0.0.1:58101:8080"
+    volumes:
+      - ./infra/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./public:/usr/share/nginx/html:ro
+    depends_on:
+      gateway:
+        condition: service_started
+
+volumes:
+  ride-data:
+  redis-data:
