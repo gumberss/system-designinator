@@ -12,6 +12,7 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="Xunit.SkippableFact" Version="1.5.85" />
   </ItemGroup>
 
   <ItemGroup>
@@ -22,6 +23,8 @@
     <ProjectReference Include="..\..\src\AiChatinator.Api\AiChatinator.Api.csproj" />
     <ProjectReference Include="..\..\src\AiChatinator.Llm\AiChatinator.Llm.csproj" />
     <ProjectReference Include="..\..\infra\AiChatinator.Cdk\AiChatinator.Cdk.csproj" />
+    <ProjectReference Include="..\..\infra\AiChatinator.Deploy\AiChatinator.Deploy.csproj" />
+    <ProjectReference Include="..\..\src\AiChatinator.Worker\AiChatinator.Worker.csproj" />
   </ItemGroup>
 
 </Project>

@@ -31,7 +31,7 @@
 - **Decision:** AWS persistence targets DynamoDB tables owned per module. Local development uses adapters with the same application contracts; unit tests do not require AWS.
 - **Reason:** The requested deployment target is DynamoDB, while local development/testing must not require AWS credentials or resources.
 - **Alternatives:** SQLite as the sole persistence technology; accessing AWS in tests.
-- **Trade-offs:** Adapters need contract tests; local mocks do not prove AWS semantics. Optional DynamoDB Local tests and a separately approved AWS validation remain necessary.
+- **Trade-offs:** Adapters need contract tests that cover the persistence behavior required by each environment.
 
 ## ADR-005: Use an outbox and at-least-once messaging
 
@@ -48,10 +48,3 @@
 - **Reason:** MCP is an integration boundary and should not expose internal repositories or bypass application authorization.
 - **Alternatives:** LLM direct access to services; one-off tool calls embedded in orchestration.
 - **Trade-offs:** Adds a policy and lifecycle component. Tool schemas, permissions, timeouts, idempotency, and untrusted outputs need explicit handling.
-
-## ADR-007: No AWS deployment in this phase
-
-- **Status:** Accepted
-- **Decision:** Generate code and run local tests only; do not provision resources, deploy, or push to AWS.
-- **Reason:** Explicit user instruction.
-- **Trade-offs:** Public URL, real Cognito/DynamoDB/SQS/SNS/S3 behavior, AWS IAM validation, and production readiness cannot be claimed from local tests.

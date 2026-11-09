@@ -5,6 +5,7 @@ src/AiChatinator.Api/App_Data/
 **/bin/
 **/obj/
 **/cdk.out/
+artifacts/
 **/node_modules/
 **/wwwroot/client/
 .vs/

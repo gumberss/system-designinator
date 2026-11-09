@@ -2,9 +2,11 @@
 
 ## Status and scope
 
-**Approved direction:** a modular .NET 10 application to begin with, with independently deployable workers and clear data ownership. Build and validate locally first. AWS CDK and application integration code may be authored, but this work must not provision, deploy, or push resources to AWS.
+**Approved direction:** a modular .NET 10 application to begin with, with independently deployable workers and clear data ownership.
 
-The current C# CDK stack is a code-only foundation for three DynamoDB tables, private/versioned S3, Cognito, encrypted SNS, and an encrypted SQS queue/DLQ. It synthesizes locally, but does not yet include application hosting, least-privilege application roles, or integrations from the running API/worker to AWS services. No AWS resources have been deployed.
+The C# CDK stack `AiChatinator-{stage}` defines three DynamoDB tables, private/versioned S3, Cognito, encrypted SNS and SQS(+DLQ), a Secrets Manager secret for the model key, a least-privilege runtime role, and three .NET 10 Lambdas: the API behind an API Gateway HTTP API, the SQS worker (partial batch failures), and an outbox relay scheduled every minute. Stage `dev` deletes all resources on destroy (S3 auto-delete, 7-day KMS window); `prod` retains stateful resources and enables PITR. The C# console app `infra/AiChatinator.Deploy` is the one-command entry point: `dotnet run --project infra/AiChatinator.Deploy -- deploy` (publish → `cdk bootstrap` → `cdk deploy` → store key via the AWS SDK) and `... -- destroy` (`cdk destroy`). It needs the CDK CLI but not the AWS CLI, and its orchestration is unit-tested with fake process/AWS adapters.
+
+Known gaps in the AWS shape: the HTTP API's 30 s timeout and response buffering prevent true SSE streaming (Lambda response streaming or a container host would fix this), the React client is not hosted, and the Lambda API relies on Cognito JWTs instead of local cookie sessions.
 
 The React/Vite client reuses the existing same-origin API and styles. It runs separately through Vite for development, or builds into `wwwroot/client`; the API serves that built client when present and retains the legacy static page as a fallback when it is absent.
 
@@ -150,6 +152,8 @@ Use separate tables per bounded owner rather than a cross-service single table. 
 
 The exact table/index projections and write amplification are validated against concrete access patterns before deployment. No service may query another service's table; cross-service screens use API composition or asynchronous projections with explicitly eventual consistency.
 
+**Implemented adapter (current code):** `DynamoDbChatStore` uses generic `pk`/`sk` string keys on three tables. Chat turns are a single `TransactWriteItems` (messages, conversation update, credit decrement with condition, idempotency record, outbox event). Pending outbox events are indexed by sparse `gsi1` on the conversations table (eventually consistent ⇒ at-least-once relay). The usage table holds daily rollups (`USER#<id>/DAILY#<date>`, atomic `ADD`) and processed-event markers (`EVENT#<id>/PROCESSED`, TTL `expiresAt`) so the SQS worker is idempotent. Parity with the local store is enforced by `ChatStoreContractTests` against DynamoDB Local.
+
 ## Versioned event envelope
 
 All domain events use a common envelope and stable, additive schema evolution:
@@ -237,6 +241,5 @@ See [adrs/README.md](adrs/README.md). Decisions are provisional where marked; im
 3. Sharing can disclose user-authored sensitive content. Add an explicit sharing confirmation and file exclusion; support immediate revocation and no-index cache headers.
 4. Cookie sessions require CSRF protections for browser mutations; production Cognito token storage/refresh strategy must be designed, not copied from the local adapter.
 5. DynamoDB transactions have item/operation limits. Keep a turn's atomic conversation write bounded; model usage reserve/settle separately and recover through reservation state transitions.
-6. SNS/SQS local parity is imperfect. Test critical idempotency, retry, and DLQ semantics in local emulators and run a separately approved AWS validation before production.
+6. Preserve idempotency, retry, and DLQ semantics across the SNS/SQS event flow.
 7. Search/web retrieval has SSRF and prompt-injection risk. It remains disabled until egress controls, URL validation, and adversarial tests exist.
-8. No AWS infrastructure is created, and no public deployment is claimed until the user separately requests it and deploys are authorized.

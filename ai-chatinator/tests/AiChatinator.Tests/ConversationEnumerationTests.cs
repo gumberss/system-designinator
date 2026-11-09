@@ -125,7 +125,8 @@ public sealed class ConversationEnumerationTests
             };
             context.Request.Headers["X-Conversation-Id"] = owned[0].Id;
             var tools = new ConversationSearchTools(
-                new HttpContextAccessor { HttpContext = context }, new LocalChatToolCatalog(store), store);
+                new HttpContextAccessor { HttpContext = context },
+                new ConversationTools(new LocalChatToolCatalog(store), store));
             var ids = new List<string>();
             var offset = 0;
             while (true)

@@ -10,8 +10,13 @@ using AiChatinator.Domain;
 using AiChatinator.Infrastructure;
 using AiChatinator.Llm;
 using AiChatinator.Api.Mcp;
+using AiChatinator.Api.Worker;
+using AiChatinator.Infrastructure.DynamoDb;
+using AiChatinator.Infrastructure.Messaging;
+using Amazon.DynamoDBv2;
 using Amazon.Lambda.AspNetCoreServer.Hosting;
 using Amazon.SimpleNotificationService;
+using Amazon.SQS;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -37,6 +42,17 @@ if (Environment.GetEnvironmentVariable("OPENAI_MODEL") is { } modelSetting)
 {
     builder.Configuration["Ai:OpenAiCompatible:Model"] = modelSetting;
 }
+var apiKeySecretArn = builder.Configuration["Ai:OpenAiCompatible:ApiKeySecretArn"];
+if (!string.IsNullOrWhiteSpace(apiKeySecretArn)
+    && builder.Configuration["Ai:Provider"] == "OpenAiCompatible"
+    && string.IsNullOrWhiteSpace(builder.Configuration["Ai:OpenAiCompatible:ApiKey"]))
+{
+    using var secrets = new Amazon.SecretsManager.AmazonSecretsManagerClient();
+    var secret = await secrets.GetSecretValueAsync(
+        new Amazon.SecretsManager.Model.GetSecretValueRequest { SecretId = apiKeySecretArn });
+    builder.Configuration["Ai:OpenAiCompatible:ApiKey"] = secret.SecretString?.Trim();
+}
+
 var requestsPerMinute = builder.Configuration.GetValue("RateLimiting:RequestsPerMinute", 10);
 if (requestsPerMinute < 1)
 {
@@ -81,10 +97,44 @@ var dataPath = builder.Configuration["LocalData:Path"]
     ?? Path.Combine(builder.Environment.ContentRootPath, "App_Data", "chat-data.json");
 
 builder.Services.AddProblemDetails();
-builder.Services.AddSingleton(new LocalDataStore(dataPath));
-builder.Services.AddSingleton<IChatStore>(services => services.GetRequiredService<LocalDataStore>());
-builder.Services.AddSingleton<IConversationFileStore>(services => services.GetRequiredService<LocalDataStore>());
-builder.Services.AddSingleton<IOutboxStore>(services => services.GetRequiredService<LocalDataStore>());
+var persistenceProvider = builder.Configuration["Persistence:Provider"] ?? "Local";
+if (persistenceProvider == "Local")
+{
+    builder.Services.AddSingleton(new LocalDataStore(dataPath));
+    builder.Services.AddSingleton<IChatStore>(services => services.GetRequiredService<LocalDataStore>());
+    builder.Services.AddSingleton<IConversationFileStore>(services => services.GetRequiredService<LocalDataStore>());
+    builder.Services.AddSingleton<IOutboxStore>(services => services.GetRequiredService<LocalDataStore>());
+}
+else if (persistenceProvider == "DynamoDb")
+{
+    var dynamoSection = builder.Configuration.GetSection("Persistence:DynamoDb");
+    var tableOptions = new DynamoDbTableOptions(
+        dynamoSection["ConversationsTable"] ?? "ai-chatinator-conversations",
+        dynamoSection["UsageTable"] ?? "ai-chatinator-usage",
+        dynamoSection["AuditTable"] ?? "ai-chatinator-audit",
+        dynamoSection.GetValue("AuditRetentionDays", 365));
+    tableOptions.Validate();
+    var dynamoServiceUrl = dynamoSection["ServiceUrl"];
+    if (!string.IsNullOrWhiteSpace(dynamoServiceUrl)
+        && !Uri.TryCreate(dynamoServiceUrl, UriKind.Absolute, out _))
+    {
+        throw new InvalidOperationException("Persistence:DynamoDb:ServiceUrl must be an absolute URL.");
+    }
+
+    builder.Services.AddSingleton<IAmazonDynamoDB>(_ => string.IsNullOrWhiteSpace(dynamoServiceUrl)
+        ? new AmazonDynamoDBClient()
+        : new AmazonDynamoDBClient(new AmazonDynamoDBConfig { ServiceURL = dynamoServiceUrl }));
+    builder.Services.AddSingleton(tableOptions);
+    builder.Services.AddSingleton<DynamoDbChatStore>();
+    builder.Services.AddSingleton<IChatStore>(services => services.GetRequiredService<DynamoDbChatStore>());
+    builder.Services.AddSingleton<IConversationFileStore>(services => services.GetRequiredService<DynamoDbChatStore>());
+    builder.Services.AddSingleton<IOutboxStore>(services => services.GetRequiredService<DynamoDbChatStore>());
+    builder.Services.AddSingleton<IUsageRollupStore>(services => services.GetRequiredService<DynamoDbChatStore>());
+}
+else
+{
+    throw new InvalidOperationException("Persistence:Provider must be Local or DynamoDb.");
+}
 var eventTransport = builder.Configuration["DomainEvents:Transport"] ?? "Local";
 if (eventTransport == "Local")
 {
@@ -109,13 +159,52 @@ else
 {
     throw new InvalidOperationException("DomainEvents:Transport must be Local or Sns.");
 }
-builder.Services.AddHostedService<OutboxDispatcher>();
+builder.Services.AddScoped<OutboxRelay>();
+if (builder.Configuration.GetValue("Outbox:DispatcherEnabled", true))
+{
+    builder.Services.AddHostedService<OutboxDispatcher>();
+}
+
+if (builder.Configuration.GetValue("Worker:Enabled", false))
+{
+    if (persistenceProvider != "DynamoDb")
+    {
+        throw new InvalidOperationException(
+            "Worker:Enabled requires Persistence:Provider DynamoDb (the usage rollup is stored in DynamoDB).");
+    }
+
+    var workerOptions = new SqsWorkerOptions(
+        builder.Configuration["Worker:QueueUrl"] ?? "",
+        builder.Configuration.GetValue("Worker:MaxMessages", 10),
+        builder.Configuration.GetValue("Worker:WaitTimeSeconds", 20));
+    workerOptions.Validate();
+    builder.Services.AddSingleton(workerOptions);
+    builder.Services.AddSingleton<IAmazonSQS, AmazonSQSClient>();
+    builder.Services.AddSingleton<IDomainEventHandler, UsageRollupHandler>();
+    builder.Services.AddScoped<DomainEventMessageProcessor>();
+    builder.Services.AddHostedService<SqsDomainEventWorker>();
+}
 builder.Services.AddSingleton<IFileTextExtractor, PdfPigTextExtractor>();
 builder.Services.AddSingleton(fileOptions);
 builder.Services.AddSingleton<ConversationFileService>();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<LocalChatToolCatalog>();
-builder.Services.AddScoped<IChatToolCatalog, McpChatToolCatalog>();
+builder.Services.AddScoped<ConversationTools>();
+// Lambda has no listening socket, so the API cannot reach its own /mcp endpoint there.
+var toolTransport = builder.Configuration["Mcp:ToolTransport"]
+    ?? (Environment.GetEnvironmentVariable("AWS_LAMBDA_FUNCTION_NAME") is null ? "Http" : "InProcess");
+if (toolTransport == "Http")
+{
+    builder.Services.AddScoped<IChatToolCatalog, McpChatToolCatalog>();
+}
+else if (toolTransport == "InProcess")
+{
+    builder.Services.AddScoped<IChatToolCatalog, InProcessChatToolCatalog>();
+}
+else
+{
+    throw new InvalidOperationException("Mcp:ToolTransport must be Http or InProcess.");
+}
 builder.Services.AddSingleton<IPasswordHasher<LocalUser>, PasswordHasher<LocalUser>>();
 var aiProvider = builder.Configuration["Ai:Provider"] ?? "LocalDemo";
 if (string.Equals(aiProvider, "LocalDemo", StringComparison.OrdinalIgnoreCase))

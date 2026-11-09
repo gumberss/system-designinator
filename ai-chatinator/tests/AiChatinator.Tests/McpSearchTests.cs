@@ -36,6 +36,7 @@ public sealed class McpSearchTests
         builder.Services.AddSingleton(new LocalDataStore(dataPath));
         builder.Services.AddSingleton<IChatStore>(services => services.GetRequiredService<LocalDataStore>());
         builder.Services.AddSingleton<LocalChatToolCatalog>();
+        builder.Services.AddScoped<ConversationTools>();
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddScoped<IChatToolCatalog, McpChatToolCatalog>();
         builder.Services.AddAuthentication("Test")

@@ -1,6 +1,6 @@
 # ai-chatinator
 
-An incrementally built AI chat platform. The approved target is a .NET 10 modular application, a React/Vite web client, background workers, service-owned DynamoDB data, an MCP integration boundary, and C# AWS CDK. **This repository is being built and validated locally; it does not provision, deploy, or push anything to AWS.**
+An incrementally built AI chat platform. The approved target is a .NET 10 modular application, a React/Vite web client, background workers, service-owned DynamoDB data, an MCP integration boundary, and C# AWS CDK.
 
 ## Current implementation
 
@@ -22,11 +22,11 @@ An incrementally built AI chat platform. The approved target is a .NET 10 modula
   Both are exposed through the authenticated `/mcp` endpoint. Chat orchestration
   discovers and invokes them using the MCP HTTP client, reusing the local search logic.
 - AWS Lambda HTTP API hosting is registered for the ASP.NET Core API; local development continues to use the normal ASP.NET Core server.
-- A code-only C# CDK foundation for DynamoDB, private/versioned S3, Cognito, encrypted SNS, and an encrypted SQS worker queue with a DLQ. Its template can be synthesized and asserted locally; it is not deployed.
+- A code-only C# CDK stack (`AiChatinator-{stage}`) for DynamoDB, private/versioned S3, Cognito, encrypted SNS/SQS(+DLQ), Secrets Manager, an HTTP API + API Lambda, an SQS worker Lambda, and a scheduled outbox-relay Lambda, with `dev` (delete everything) and `prod` (retain data) stages. One-command deploy/destroy scripts exist (see [Deploy to / remove from AWS](#deploy-to--remove-from-aws)).
 - A React/Vite client can run as a separate local development server or be built into the API's static client directory.
 - Architecture and ADRs in [docs/architecture.md](docs/architecture.md) and [docs/adrs/README.md](docs/adrs/README.md).
 
-Some product requirements remain in progress. This is not yet a production deployment: the current local JSON persistence and in-process throttling are single-instance development adapters. The CDK stack defines foundation resources only; there is no Lambda function/API Gateway resource integration, application IAM wiring, or AWS persistence/event adapter. Arbitrary external MCP server registration, the standalone worker, production identity flow, PDF image/OCR extraction, and asynchronous/quarantined uploads are not implemented.
+Some product requirements remain in progress. The current local JSON persistence and in-process throttling are single-instance development adapters. Arbitrary external MCP server registration, production identity flow, PDF image/OCR extraction, and asynchronous/quarantined uploads are not implemented.
 
 ## Run locally
 
@@ -151,6 +151,80 @@ dotnet run --project .\infra\AiChatinator.Cdk\AiChatinator.Cdk.csproj
 
 Synthesis is not deployment and does not create AWS resources.
 
-## AWS boundary
+## AWS integration (code-only, opt-in)
 
-No AWS deployment has been run and no resources have been provisioned. Keep deployment and public URL access out of scope unless separately authorized.
+Local remains the default. AWS adapters are selected by configuration.
+
+| Setting | Values | Effect |
+|---|---|---|
+| `Persistence:Provider` | `Local` (default) / `DynamoDb` | `DynamoDbChatStore` implements `IChatStore`, `IOutboxStore`, `IUsageRollupStore` |
+| `Persistence:DynamoDb:ServiceUrl` | e.g. `http://localhost:8000` | Optional; points at DynamoDB Local instead of AWS |
+| `Persistence:DynamoDb:ConversationsTable` / `UsageTable` / `AuditTable` | table names | Defaults match the CDK stack (`ai-chatinator-*`) |
+| `DomainEvents:Transport` / `DomainEvents:TopicArn` | `Sns` + ARN | Outbox events published to SNS |
+| `Outbox:DispatcherEnabled` | bool | Background relay drains pending outbox events |
+| `Worker:Enabled` / `Worker:QueueUrl` | bool + SQS URL | `SqsDomainEventWorker` long-polls SQS (requires `DynamoDb`) |
+
+Flow: chat turn → transactional write (messages + credits + outbox event) → `OutboxRelay` → SNS →
+SQS → worker → `UsageRollupHandler` (daily usage counters). Delivery is **at-least-once**; consumers
+dedupe by `eventId` (processed markers with 30-day TTL). Failed messages return to the queue and go to
+the DLQ after 5 receives. Keys: every table uses `pk`/`sk`; conversations and usage have a sparse
+`gsi1` (pending outbox / usage by date); usage and audit use TTL `expiresAt`.
+
+Run against DynamoDB Local (Java required):
+
+```powershell
+java -jar C:\tools\dynamodb-local\DynamoDBLocal.jar -inMemory -port 8000
+$env:Persistence__Provider = 'DynamoDb'
+$env:Persistence__DynamoDb__ServiceUrl = 'http://localhost:8000'
+```
+
+The tables must already exist (in AWS they come from the CDK stack; against DynamoDB Local, create them with the
+same pk/sk + gsi1 schema, as DynamoDbLocalFixture.CreateTablesAsync does in the tests).
+
+`ChatStoreContractTests` runs the same suite against `LocalDataStore` and DynamoDB Local
+(`DYNAMODB_LOCAL_DIR`, default `C:\tools\dynamodb-local`); DynamoDB tests are skipped if Java/JAR is missing.
+The CDK stack (`infra/AiChatinator.Cdk`) defines the matching tables, GSIs, TTL, SNS→SQS(+DLQ), and a
+least-privilege runtime role, with outputs for table names, topic ARN, and queue URL.
+S3 is not yet used for attachment text (≤40k chars fits the 400 KB item limit); DynamoDB Streams is a
+possible future replacement for the outbox poller.
+
+## Deploy to / remove from AWS
+
+Deploy/destroy is a C# console app (`infra/AiChatinator.Deploy`) run with `dotnet`; no PowerShell scripts
+and no AWS CLI are needed (identity and Secrets Manager calls use the AWS SDK for .NET).
+Prerequisites: .NET 10 SDK, AWS credentials in the default chain (env vars, `~/.aws` profile, or SSO), and
+the CDK CLI (`npm install -g aws-cdk`, requires Node.js) which performs synth, asset upload and CloudFormation.
+
+```bash
+# Deploy (publishes linux-x64 Lambda bundles to artifacts/lambda, bootstraps CDK, deploys AiChatinator-dev)
+dotnet run --project infra/AiChatinator.Deploy -- deploy
+
+# With a real model; the key is written to Secrets Manager after deploy, never into the template
+OPENAI_API_KEY=<key> dotnet run --project infra/AiChatinator.Deploy -- deploy --ai-provider OpenAiCompatible
+
+# Remove everything from the dev stage
+dotnet run --project infra/AiChatinator.Deploy -- destroy
+```
+
+Both commands accept `--stage dev|prod`, `--profile`, and `--region`; `deploy` also accepts
+`--skip-bootstrap`, `destroy` accepts `--force` (skips the dev prompt). `prod` always asks for confirmation.
+Run with `--help` for the full usage.
+Outputs (API URL, user pool, table names, queue URL, …) are saved to `artifacts/cdk-outputs-{stage}.json`.
+
+| Stage | On destroy |
+|---|---|
+| `dev` (default) | Everything is deleted: tables, bucket and its objects, user pool, topic/queues, secret, Lambdas, log groups. The KMS key enters the 7-day AWS minimum pending-deletion window. |
+| `prod` | Tables (with PITR), bucket, user pool, and KMS key are **retained**; delete them manually if needed. |
+
+Not removed in any stage: the shared `CDKToolkit` bootstrap stack.
+
+Current limitations of the AWS shape: API Gateway HTTP APIs time out at 30 s and buffer responses, so
+SSE answers arrive at once instead of streaming; the React client is not hosted (run it locally against
+the API URL); in Lambda the API expects Cognito JWTs rather than the local cookie sessions.
+
+Synthesize without deploying (no AWS calls; placeholder asset folders are enough):
+
+```powershell
+cd .\infra\AiChatinator.Cdk
+cdk synth -c stage=dev -c apiAsset=<folder> -c workerAsset=<folder>
+```

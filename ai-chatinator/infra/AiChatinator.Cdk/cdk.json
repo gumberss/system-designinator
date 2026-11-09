@@ -1,0 +1,7 @@
+﻿{
+  "app": "dotnet run --project AiChatinator.Cdk.csproj",
+  "context": {
+    "stage": "dev",
+    "aiProvider": "LocalDemo"
+  }
+}

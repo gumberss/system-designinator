@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/infra/">
     <Project Path="infra/AiChatinator.Cdk/AiChatinator.Cdk.csproj" />
+    <Project Path="infra/AiChatinator.Deploy/AiChatinator.Deploy.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/AiChatinator.Api/AiChatinator.Api.csproj" />
@@ -8,6 +9,7 @@
     <Project Path="src/AiChatinator.Domain/AiChatinator.Domain.csproj" />
     <Project Path="src/AiChatinator.Infrastructure/AiChatinator.Infrastructure.csproj" />
     <Project Path="src/AiChatinator.Llm/AiChatinator.Llm.csproj" />
+    <Project Path="src/AiChatinator.Worker/AiChatinator.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/AiChatinator.Tests/AiChatinator.Tests.csproj" />

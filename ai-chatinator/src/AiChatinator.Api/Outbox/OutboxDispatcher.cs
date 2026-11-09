@@ -1,5 +1,6 @@
 using AiChatinator.Application;
 using AiChatinator.Domain;
+using AiChatinator.Infrastructure.Messaging;
 
 namespace AiChatinator.Api.Outbox;
 
@@ -23,51 +24,41 @@ public sealed class LocalDomainEventPublisher(ILogger<LocalDomainEventPublisher>
 
 public sealed class OutboxDispatcher(
     IServiceScopeFactory scopeFactory,
-    IDomainEventPublisher publisher,
     ILogger<OutboxDispatcher> logger) : BackgroundService
 {
+    private const int BatchSize = 20;
     private static readonly TimeSpan IdleDelay = TimeSpan.FromSeconds(2);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            using var scope = scopeFactory.CreateScope();
-            var store = scope.ServiceProvider.GetRequiredService<IOutboxStore>();
-            var pendingEvents = await store.GetPendingEventsAsync(20, stoppingToken);
-            if (pendingEvents.Count == 0)
+            OutboxRelayResult result;
+            try
             {
-                await Task.Delay(IdleDelay, stoppingToken);
+                using var scope = scopeFactory.CreateScope();
+                var relay = scope.ServiceProvider.GetRequiredService<OutboxRelay>();
+                result = await relay.RelayPendingAsync(BatchSize, stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                logger.LogError(exception, "Outbox relay pass failed.");
+                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
                 continue;
             }
 
-            foreach (var record in pendingEvents)
+            if (result.Failed > 0)
             {
-                stoppingToken.ThrowIfCancellationRequested();
-                try
-                {
-                    await publisher.PublishAsync(record.Event, stoppingToken);
-                    await store.MarkEventDispatchedAsync(record.Event.EventId, stoppingToken);
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception exception)
-                {
-                    await store.MarkEventDispatchFailedAsync(
-                        record.Event.EventId,
-                        exception.GetType().Name,
-                        stoppingToken);
-                    logger.LogError(
-                        exception,
-                        "Failed to dispatch outbox event {EventId} ({EventType}); it remains pending for retry.",
-                        record.Event.EventId,
-                        record.Event.EventType);
-
-                    var retrySeconds = Math.Min(60, Math.Pow(2, Math.Min(record.Attempts, 6)));
-                    await Task.Delay(TimeSpan.FromSeconds(retrySeconds), stoppingToken);
-                }
+                var retrySeconds = Math.Min(60, Math.Pow(2, Math.Min(result.MaxFailedAttempts, 6)));
+                await Task.Delay(TimeSpan.FromSeconds(retrySeconds), stoppingToken);
+            }
+            else if (result.Dispatched == 0)
+            {
+                await Task.Delay(IdleDelay, stoppingToken);
             }
         }
     }
