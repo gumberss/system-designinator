@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -13,14 +13,12 @@ class ToolCall:
     name: str
     arguments: dict[str, Any]
 
-    def as_message_value(self) -> dict[str, Any]:
+    def as_input_item(self) -> dict[str, Any]:
         return {
-            "id": self.call_id,
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "arguments": json.dumps(self.arguments, separators=(",", ":")),
-            },
+            "type": "function_call",
+            "call_id": self.call_id,
+            "name": self.name,
+            "arguments": json.dumps(self.arguments, separators=(",", ":")),
         }
 
 
@@ -28,6 +26,15 @@ class ToolCall:
 class ToolCompletion:
     content: str
     tool_calls: list[ToolCall]
+    output_items: list[dict[str, Any]] = field(default_factory=list)
+
+    def as_input_items(self) -> list[dict[str, Any]]:
+        if self.output_items:
+            return self.output_items
+        items = [call.as_input_item() for call in self.tool_calls]
+        if self.content:
+            items.insert(0, {"role": "assistant", "content": self.content})
+        return items
 
 
 class OpenAIProvider:
@@ -38,11 +45,13 @@ class OpenAIProvider:
         chat_model: str,
         embedding_model: str,
         embedding_dimensions: int,
+        reasoning_effort: str | None = None,
     ) -> None:
         self.client = client
         self.chat_model = chat_model
         self.embedding_model = embedding_model
         self.embedding_dimensions = embedding_dimensions
+        self.reasoning_effort = reasoning_effort
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         response = await self.client.post(
@@ -74,23 +83,13 @@ class OpenAIProvider:
         return embeddings
 
     async def complete(self, messages: list[dict[str, str]]) -> str:
-        response = await self.client.post(
-            "/chat/completions",
-            json={
-                "model": self.chat_model,
-                "messages": messages,
-                "max_completion_tokens": 700,
-                "temperature": 0.2,
-            },
+        completion = await self.complete_with_tools(
+            [{"role": message["role"], "content": message["content"]} for message in messages],
+            [],
         )
-        response.raise_for_status()
-        choices = response.json().get("choices")
-        if not isinstance(choices, list) or not choices:
-            raise RuntimeError("OpenAI returned no chat completion choices")
-        content = choices[0].get("message", {}).get("content")
-        if not isinstance(content, str) or not content.strip():
-            raise RuntimeError("OpenAI returned an empty chat completion")
-        return content.strip()
+        if completion.tool_calls or not completion.content:
+            raise RuntimeError("OpenAI returned no final answer")
+        return completion.content
 
     async def complete_with_tools(
         self,
@@ -99,39 +98,51 @@ class OpenAIProvider:
     ) -> ToolCompletion:
         body: dict[str, Any] = {
             "model": self.chat_model,
-            "messages": messages,
-            "max_completion_tokens": 700,
-            "temperature": 0.2,
+            "input": messages,
+            "max_output_tokens": 4096,
+            "store": False,
+            "include": ["reasoning.encrypted_content"],
         }
+        if self.reasoning_effort is not None:
+            body["reasoning"] = {"effort": self.reasoning_effort}
         if tools:
             body["tools"] = tools
             body["tool_choice"] = "auto"
-        response = await self.client.post("/chat/completions", json=body)
+        response = await self.client.post("/responses", json=body)
         response.raise_for_status()
-        choices = response.json().get("choices")
-        if not isinstance(choices, list) or not choices:
-            raise RuntimeError("OpenAI returned no chat completion choices")
-        message = choices[0].get("message")
-        if not isinstance(message, dict):
-            raise RuntimeError("OpenAI returned an invalid chat completion")
-        content = message.get("content")
-        if content is None:
-            content = ""
-        if not isinstance(content, str):
-            raise RuntimeError("OpenAI returned invalid chat completion content")
-        raw_tool_calls = message.get("tool_calls", [])
-        if not isinstance(raw_tool_calls, list):
-            raise RuntimeError("OpenAI returned invalid tool calls")
+        data = response.json()
+        if not isinstance(data, dict) or data.get("status") != "completed":
+            raise RuntimeError("OpenAI returned an incomplete or failed response")
+        output = data.get("output")
+        if not isinstance(output, list):
+            raise RuntimeError("OpenAI returned invalid response output")
+        output_items: list[dict[str, Any]] = []
+        text_parts: list[str] = []
         tool_calls: list[ToolCall] = []
-        for raw_call in raw_tool_calls:
-            if not isinstance(raw_call, dict):
-                raise RuntimeError("OpenAI returned an invalid tool call")
-            function = raw_call.get("function")
-            if not isinstance(function, dict):
-                raise RuntimeError("OpenAI returned an invalid tool call")
-            call_id = raw_call.get("id")
-            name = function.get("name")
-            arguments_text = function.get("arguments")
+        for item in output:
+            if not isinstance(item, dict):
+                raise RuntimeError("OpenAI returned an invalid output item")
+            output_items.append(item)
+            if item.get("type") == "reasoning":
+                continue
+            if item.get("type") == "message":
+                content = item.get("content")
+                if not isinstance(content, list):
+                    raise RuntimeError("OpenAI returned invalid response content")
+                for part in content:
+                    if (
+                        not isinstance(part, dict)
+                        or part.get("type") != "output_text"
+                        or not isinstance(part.get("text"), str)
+                    ):
+                        raise RuntimeError("OpenAI returned unsupported response content")
+                    text_parts.append(part["text"])
+                continue
+            if item.get("type") != "function_call":
+                raise RuntimeError("OpenAI returned an unsupported output item")
+            call_id = item.get("call_id")
+            name = item.get("name")
+            arguments_text = item.get("arguments")
             if not isinstance(call_id, str) or not isinstance(name, str):
                 raise RuntimeError("OpenAI returned an invalid tool call")
             if not isinstance(arguments_text, str):
@@ -143,9 +154,12 @@ class OpenAIProvider:
             if not isinstance(arguments, dict):
                 raise RuntimeError("OpenAI tool arguments must be a JSON object")
             tool_calls.append(ToolCall(call_id, name, arguments))
-        if not content.strip() and not tool_calls:
-            raise RuntimeError("OpenAI returned an empty chat completion")
-        return ToolCompletion(content=content.strip(), tool_calls=tool_calls)
+        content = "\n".join(text_parts).strip()
+        if not content and not tool_calls:
+            raise RuntimeError("OpenAI returned an empty response")
+        return ToolCompletion(
+            content=content, tool_calls=tool_calls, output_items=output_items,
+        )
 
 
 def qdrant_collection_body(dimensions: int) -> dict[str, Any]:

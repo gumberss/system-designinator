@@ -40,7 +40,7 @@ services:
       - "127.0.0.1:19092:19092"
       - "127.0.0.1:19644:9644"
     healthcheck:
-      test: ["CMD", "rpk", "cluster", "health", "--brokers", "localhost:9092"]
+      test: ["CMD", "rpk", "cluster", "health", "--exit-when-healthy", "-X", "admin.hosts=localhost:9644"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -68,7 +68,11 @@ services:
     volumes:
       - marketplace-qdrant:/qdrant/storage
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:6333/healthz"]
+      test:
+        - CMD
+        - bash
+        - -ec
+        - "exec 3<>/dev/tcp/127.0.0.1/6333; printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3; grep -q '^HTTP/1\\.[01] 200 ' <&3"
       interval: 10s
       timeout: 5s
       retries: 30
@@ -244,7 +248,7 @@ services:
     build: .
     command: ["uvicorn", "services.search.app:app", "--host", "0.0.0.0", "--port", "8008"]
     environment:
-      DATABASE_URL: "******postgres:5432/search"
+      DATABASE_URL: postgresql+psycopg://travel:local-only-change-me@postgres:5432/search
       KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
       OPENSEARCH_URL: http://opensearch:9200
       SEARCH_ADMIN_TOKEN: ${SEARCH_ADMIN_TOKEN:-local-only-search-admin-token}
@@ -265,17 +269,20 @@ services:
     build: .
     command: ["uvicorn", "services.ai_gateway.app:app", "--host", "0.0.0.0", "--port", "8009"]
     environment:
-      DATABASE_URL: "******postgres:5432/assistant"
+      DATABASE_URL: postgresql+psycopg://travel:local-only-change-me@postgres:5432/assistant
       JWT_SECRET: ${JWT_SECRET:-local-only-change-this-secret}
       SEARCH_URL: http://search:8008
       BOOKING_URL: http://booking:8006
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-4.1-mini}
+      OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-}
       OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       OPENAI_EMBEDDING_DIMENSIONS: ${OPENAI_EMBEDDING_DIMENSIONS:-1536}
       QDRANT_URL: http://qdrant:6333
     depends_on:
+      postgres:
+        condition: service_healthy
       qdrant:
         condition: service_healthy
     healthcheck:

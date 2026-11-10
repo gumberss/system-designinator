@@ -283,6 +283,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             chat_model=chat_model,
             embedding_model=embedding_model,
             embedding_dimensions=embedding_dimensions,
+            reasoning_effort=os.getenv("OPENAI_REASONING_EFFORT", "").strip() or None,
         )
         if openai_client is not None
         else None
@@ -499,11 +500,10 @@ def _openai_tool_definitions(mcp_tools: list[Any]) -> list[dict[str, Any]]:
     return [
         {
             "type": "function",
-            "function": {
-                "name": tool.name,
-                "description": tool.description or "",
-                "parameters": tool.input_schema,
-            },
+            "name": tool.name,
+            "description": tool.description or "",
+            "parameters": tool.input_schema,
+            "strict": False,
         }
         for tool in mcp_tools
         if tool.name != "start_booking"
@@ -532,7 +532,14 @@ async def _run_assistant_turn(
             "content": (
                 "You are a travel planning assistant. Use the supplied tools for "
                 "current catalog searches, itinerary drafts, quotes, and booking "
-                "status. Search results are advisory, never guarantees. A quote "
+                "status. Search results are advisory, never guarantees. "
+                "For city-based catalog searches, resolve the catalog city_code "
+                "with search_travel(kind='destination', query=city_name), unless "
+                "already returned by a tool in this conversation. Then search "
+                "the requested kind using city_code and an empty query. The query "
+                "field matches item text, not city names, and all filters are "
+                "combined with AND. Only use a nonempty query for additional "
+                "item-text constraints; never guess catalog city codes. A quote "
                 "does not reserve inventory. Never call or imply that a booking "
                 "has started without a separate explicit confirmation by the "
                 "authenticated user. You cannot confirm on the user's behalf. "
@@ -547,7 +554,7 @@ async def _run_assistant_turn(
     tool_listing = await mcp_client.list_tools()
     tool_definitions = _openai_tool_definitions(tool_listing.tools)
     available_names = {
-        definition["function"]["name"] for definition in tool_definitions
+        definition["name"] for definition in tool_definitions
     }
     pending_quote_data: dict[str, Any] | None = None
 
@@ -559,15 +566,7 @@ async def _run_assistant_turn(
             return completion.content, citations, pending_quote_data
         if len(completion.tool_calls) > 4:
             raise RuntimeError("Assistant requested too many tools in one turn")
-        messages.append(
-            {
-                "role": "assistant",
-                "content": completion.content or None,
-                "tool_calls": [
-                    call.as_message_value() for call in completion.tool_calls
-                ],
-            }
-        )
+        messages.extend(completion.as_input_items())
         for call in completion.tool_calls:
             if call.name not in available_names:
                 output: Any = {"error": "Tool is not available"}
@@ -587,9 +586,9 @@ async def _run_assistant_turn(
                 pending_quote_data = output
             messages.append(
                 {
-                    "role": "tool",
-                    "tool_call_id": call.call_id,
-                    "content": output_text,
+                    "type": "function_call_output",
+                    "call_id": call.call_id,
+                    "output": output_text,
                 }
             )
 
@@ -659,9 +658,7 @@ async def assistant_chat(
                     qdrant=request.app.state.qdrant,
                     mcp_client=mcp_client,
                 )
-        except asyncio.CancelledError:
-            raise
-        except (httpx.HTTPStatusError, httpx.RequestError, RuntimeError) as error:
+        except* (httpx.HTTPStatusError, httpx.RequestError, RuntimeError) as error:
             logger.exception("Assistant request failed")
             raise HTTPException(
                 status_code=503,

@@ -97,12 +97,27 @@ def _as_naive_utc(value: str) -> datetime:
 
 
 async def search_travel(
-    query: str = Field(default="", max_length=120),
+    query: str = Field(
+        default="", max_length=120,
+        description="Text matched against catalog items, not a city-name lookup. "
+        "Leave empty for a city-only search; filters are combined with AND.",
+    ),
     kind: Literal["destination", "flight", "hotel", "activity"] | None = None,
-    city_code: str | None = Field(default=None, min_length=3, max_length=3),
+    city_code: str | None = Field(
+        default=None, min_length=3, max_length=3,
+        description="Catalog city code returned by a destination search, e.g. TYO "
+        "for Tokyo. Use this to filter hotels, flights, or activities by city.",
+    ),
     limit: int = Field(default=5, ge=1, le=SEARCH_LIMIT),
 ) -> dict[str, Any]:
-    """Search the current travel catalog; results are advisory, not inventory holds."""
+    """Search the current travel catalog; results are advisory, not inventory holds.
+
+    To find items in a city, first resolve its catalog code with kind="destination"
+    and query set to the city name. Then search the desired kind using the returned
+    city_code and leave query empty unless filtering by an item's name or text.
+    For Tokyo hotels, use kind="hotel", city_code="TYO", query="".
+    Do not guess city codes or repeat the city name in query for a city-only search.
+    """
     params: dict[str, Any] = {"limit": limit}
     if query.strip():
         params["query"] = query.strip()

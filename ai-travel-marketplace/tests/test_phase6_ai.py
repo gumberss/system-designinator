@@ -94,7 +94,14 @@ def test_openai_provider_sorts_embeddings_and_sends_model_configuration() -> Non
             )
         return httpx.Response(
             200,
-            json={"choices": [{"message": {"content": "Grounded answer [japan]."}}]},
+            json={
+                "status": "completed",
+                "output": [{
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Grounded answer [japan]."}],
+                }],
+            },
         )
 
     async def run() -> tuple[list[list[float]], str]:
@@ -121,7 +128,13 @@ def test_openai_provider_sorts_embeddings_and_sends_model_configuration() -> Non
     assert requests[0]["body"]["model"] == "embedding-test"
     assert requests[0]["body"]["dimensions"] == 2
     assert requests[1]["body"]["model"] == "chat-test"
-    assert requests[1]["body"]["max_completion_tokens"] == 700
+    assert requests[1]["path"] == "/v1/responses"
+    assert requests[1]["body"]["input"] == [{"role": "user", "content": "question"}]
+    assert requests[1]["body"]["max_output_tokens"] == 4096
+    assert requests[1]["body"]["store"] is False
+    assert requests[1]["body"]["include"] == ["reasoning.encrypted_content"]
+    assert "temperature" not in requests[1]["body"]
+    assert "reasoning" not in requests[1]["body"]
 
 
 def test_ai_answer_retrieves_context_and_returns_source_citations() -> None:
@@ -132,14 +145,20 @@ def test_ai_answer_retrieves_context_and_returns_source_citations() -> None:
                 200,
                 json={"data": [{"index": 0, "embedding": [0.4, 0.6]}]},
             )
-        assert body["messages"][0]["role"] == "system"
-        assert "[japan]" in body["messages"][1]["content"]
+        assert body["input"][0]["role"] == "system"
+        assert "[japan]" in body["input"][1]["content"]
         return httpx.Response(
             200,
             json={
-                "choices": [
-                    {"message": {"content": "Kyoto has historic districts [japan]."}}
-                ]
+                "status": "completed",
+                "output": [{
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{
+                        "type": "output_text",
+                        "text": "Kyoto has historic districts [japan].",
+                    }],
+                }],
             },
         )
 
@@ -201,6 +220,47 @@ def test_ai_answer_retrieves_context_and_returns_source_citations() -> None:
             "revision": "sha256-revision",
         }
     ]
+
+
+@pytest.mark.parametrize(
+    "response_data",
+    [
+        {"status": "incomplete", "output": []},
+        {"status": "failed", "output": []},
+        {"status": "completed", "output": []},
+        {"status": "completed", "output": [{"type": "reasoning", "summary": []}]},
+        {"status": "completed", "output": [{"type": "message", "content": None}]},
+        {
+            "status": "completed",
+            "output": [{"type": "function_call", "call_id": "call-1",
+                        "name": "search_travel", "arguments": "not-json"}],
+        },
+        {
+            "status": "completed",
+            "output": [{"type": "message", "content": [
+                {"type": "refusal", "refusal": "Cannot comply"},
+            ]}],
+        },
+    ],
+)
+def test_provider_rejects_incomplete_or_invalid_responses(
+    response_data: dict[str, Any],
+) -> None:
+    async def run() -> None:
+        async with httpx.AsyncClient(
+            base_url="https://openai.example/v1",
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(200, json=response_data)
+            ),
+        ) as client:
+            provider = OpenAIProvider(
+                client, chat_model="chat-test",
+                embedding_model="embedding-test", embedding_dimensions=2,
+            )
+            await provider.complete_with_tools([{"role": "user", "content": "Hello"}], [])
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(run())
 
 
 def test_qdrant_ingestion_creates_dimensioned_collection_and_stores_metadata(

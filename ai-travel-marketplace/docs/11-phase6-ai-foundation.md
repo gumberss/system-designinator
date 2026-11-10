@@ -26,6 +26,15 @@ with `OPENAI_CHAT_MODEL`, `OPENAI_EMBEDDING_MODEL`,
 run the other marketplace services. Without a key, AI requests fail clearly
 with HTTP 503; search, booking, and service health remain available.
 
+Chat requests use the model's default temperature instead of forcing a sampling
+value, since some models reject custom temperatures.
+Both chat endpoints use OpenAI's `/v1/responses` API; embeddings still use
+`/v1/embeddings`. A custom `OPENAI_BASE_URL` must support these APIs, not just
+Chat Completions. Responses allow up to 4096 output tokens, including reasoning
+tokens. Set `OPENAI_REASONING_EFFORT=medium` to explicitly enable reasoning on
+a model that supports it; leave it empty for models without reasoning support
+or to use the provider's default.
+
 ## Curated RAG
 
 - Original curated English Markdown sources live under `knowledge/`; they are
@@ -66,7 +75,9 @@ service, where its JWT is validated using the shared identity configuration.
 ## Compose and verification
 
 The local Compose stack includes Qdrant with a named data volume and the AI
-Gateway. Set the key in `.env`, then run:
+Gateway. The pinned Qdrant image does not include `curl`; its healthcheck
+uses Bash to request `/healthz` and verify an HTTP 200 response.
+Set the key in `.env`, then run:
 
 ```powershell
 docker compose up --build -d

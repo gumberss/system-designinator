@@ -7,7 +7,9 @@ from decimal import Decimal
 from typing import Any
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
+from mcp import Client
 
 from packages.common.booking import utc_now
 from packages.common.security import create_access_token, current_user_id
@@ -21,27 +23,27 @@ def test_openai_tool_calls_are_parsed_and_sent_with_schemas() -> None:
     captured: dict[str, Any] = {}
 
     async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/responses"
         captured.update(json.loads(request.content))
         return httpx.Response(
             200,
             json={
-                "choices": [
+                "status": "completed",
+                "output": [
                     {
-                        "message": {
-                            "content": None,
-                            "tool_calls": [
-                                {
-                                    "id": "tool-call-1",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "search_travel",
-                                        "arguments": '{"query":"Tokyo"}',
-                                    },
-                                }
-                            ],
-                        }
-                    }
-                ]
+                        "type": "reasoning",
+                        "id": "rs_1",
+                        "summary": [],
+                        "encrypted_content": "encrypted-reasoning",
+                    },
+                    {
+                        "id": "fc_1",
+                        "call_id": "tool-call-1",
+                        "type": "function_call",
+                        "name": "search_travel",
+                        "arguments": '{"query":"Tokyo"}',
+                    },
+                ],
             },
         )
 
@@ -55,16 +57,35 @@ def test_openai_tool_calls_are_parsed_and_sent_with_schemas() -> None:
                 chat_model="chat-test",
                 embedding_model="embedding-test",
                 embedding_dimensions=2,
+                reasoning_effort="medium",
             )
             return await provider.complete_with_tools(
-                [{"role": "user", "content": "Search Tokyo"}],
+                [
+                    {"role": "user", "content": "Search Tokyo"},
+                    {
+                        "type": "reasoning",
+                        "id": "rs_previous",
+                        "summary": [],
+                        "encrypted_content": "previous-encrypted-reasoning",
+                    },
+                    {
+                        "type": "function_call",
+                        "call_id": "previous-call",
+                        "name": "search_travel",
+                        "arguments": '{"query":"Japan"}',
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "previous-call",
+                        "output": '{"results":[]}',
+                    },
+                ],
                 [
                     {
                         "type": "function",
-                        "function": {
-                            "name": "search_travel",
-                            "parameters": {"type": "object"},
-                        },
+                        "name": "search_travel",
+                        "parameters": {"type": "object"},
+                        "strict": False,
                     }
                 ],
             )
@@ -72,7 +93,16 @@ def test_openai_tool_calls_are_parsed_and_sent_with_schemas() -> None:
     completion = asyncio.run(run())
 
     assert captured["tool_choice"] == "auto"
-    assert captured["tools"][0]["function"]["name"] == "search_travel"
+    assert "temperature" not in captured
+    assert captured["tools"][0]["name"] == "search_travel"
+    assert captured["tools"][0]["strict"] is False
+    assert captured["store"] is False
+    assert captured["include"] == ["reasoning.encrypted_content"]
+    assert captured["reasoning"] == {"effort": "medium"}
+    assert captured["input"][1]["encrypted_content"] == "previous-encrypted-reasoning"
+    assert captured["input"][2]["call_id"] == captured["input"][3]["call_id"]
+    assert completion.as_input_items()[0]["encrypted_content"] == "encrypted-reasoning"
+    assert completion.as_input_items()[1]["call_id"] == "tool-call-1"
     assert completion.content == ""
     assert completion.tool_calls == [
         ToolCall("tool-call-1", "search_travel", {"query": "Tokyo"})
@@ -93,6 +123,88 @@ def _configure_assistant(
         app.state.runtime["degraded_reason"] = None
 
     monkeypatch.setattr(ai_gateway_module, "_prepare_knowledge", skip_knowledge_setup)
+
+
+def test_mcp_city_search_exposes_guidance_and_omits_empty_text_query(
+    monkeypatch: Any,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def fake_platform_request(
+        service: str, method: str, path: str, **kwargs: Any,
+    ) -> dict[str, Any]:
+        assert (service, method, path) == ("SEARCH_URL", "GET", "/search")
+        calls.append(kwargs["params"])
+        return {"items": []}
+
+    monkeypatch.setattr(assistant_mcp, "_platform_request", fake_platform_request)
+
+    async def run() -> None:
+        async with Client(assistant_mcp.create_mcp_server()) as client:
+            tools = ai_gateway_module._openai_tool_definitions(
+                (await client.list_tools()).tools
+            )
+            tool = next(tool for tool in tools if tool["name"] == "search_travel")
+            assert 'city_code="TYO", query=""' in tool["description"]
+            properties = tool["parameters"]["properties"]
+            assert "AND" in properties["query"]["description"]
+            assert "destination search" in properties["city_code"]["description"]
+            result = await client.call_tool(
+                "search_travel", {"kind": "destination", "query": "Tokyo"},
+            )
+            assert not result.is_error
+            result = await client.call_tool(
+                "search_travel", {"kind": "hotel", "city_code": "tyo", "query": ""},
+            )
+            assert not result.is_error
+
+    asyncio.run(run())
+    assert calls == [
+        {"limit": 5, "query": "Tokyo", "kind": "destination"},
+        {"limit": 5, "kind": "hotel", "city_code": "TYO"},
+    ]
+
+
+@pytest.mark.parametrize("failure", ["http_status", "transport", "runtime"])
+def test_assistant_provider_failure_returns_503_through_mcp(
+    monkeypatch: Any,
+    tmp_path: Any,
+    failure: str,
+) -> None:
+    _configure_assistant(monkeypatch, tmp_path)
+
+    async def fake_retrieve(
+        question: str, provider: Any, qdrant: Any,
+    ) -> list[dict[str, Any]]:
+        return []
+
+    class FailingProvider:
+        chat_model = "chat-test"
+
+        async def complete_with_tools(
+            self,
+            messages: list[dict[str, Any]],
+            tools: list[dict[str, Any]],
+        ) -> ToolCompletion:
+            request = httpx.Request("POST", "https://openai.example/v1/responses")
+            if failure == "http_status":
+                response = httpx.Response(400, request=request)
+                response.raise_for_status()
+            if failure == "transport":
+                raise httpx.ConnectError("Provider connection failed", request=request)
+            raise RuntimeError("Invalid provider response")
+
+    monkeypatch.setattr(ai_gateway_module, "retrieve_relevant_chunks", fake_retrieve)
+    with TestClient(ai_gateway_module.app, raise_server_exceptions=False) as client:
+        client.app.state.provider = FailingProvider()
+        response = client.post(
+            "/assistant/chat",
+            headers={"Authorization": "Bearer " + create_access_token("traveler-1")},
+            json={"message": "Help me plan a trip"},
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Assistant is temporarily unavailable"}
 
 
 def test_assistant_selects_mcp_search_tool_and_scopes_conversation(
@@ -135,9 +247,10 @@ def test_assistant_selects_mcp_search_tool_and_scopes_conversation(
             messages: list[dict[str, Any]],
             tools: list[dict[str, Any]],
         ) -> ToolCompletion:
-            names = {tool["function"]["name"] for tool in tools}
+            names = {tool["name"] for tool in tools}
             assert "search_travel" in names
             assert "start_booking" not in names
+            assert "never guess catalog city codes" in messages[0]["content"]
             self.turn += 1
             if self.turn == 1:
                 return ToolCompletion(
@@ -149,8 +262,25 @@ def test_assistant_selects_mcp_search_tool_and_scopes_conversation(
                             arguments={"query": "Tokyo", "kind": "destination"},
                         )
                     ],
+                    output_items=[
+                        {
+                            "type": "reasoning",
+                            "id": "rs_search",
+                            "summary": [],
+                            "encrypted_content": "search-reasoning",
+                        },
+                        {
+                            "type": "function_call",
+                            "call_id": "search-call-1",
+                            "name": "search_travel",
+                            "arguments": '{"query":"Tokyo","kind":"destination"}',
+                        },
+                    ],
                 )
-            assert any(message.get("role") == "tool" for message in messages)
+            assert any(message.get("type") == "function_call_output" for message in messages)
+            assert messages[-3]["encrypted_content"] == "search-reasoning"
+            assert messages[-2]["call_id"] == messages[-1]["call_id"] == "search-call-1"
+            assert "destination-tokyo" in messages[-1]["output"]
             return ToolCompletion(
                 content="I found destination results for Tokyo.",
                 tool_calls=[],
@@ -218,6 +348,7 @@ def test_assistant_selects_mcp_search_tool_and_scopes_conversation(
         "user",
         "assistant",
     ]
+    assert "search-reasoning" not in stored.text
     assert other_user.status_code == 404
 
 

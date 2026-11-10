@@ -24,6 +24,14 @@ Available tools:
 - `start_booking`: available on the MCP server only after the user has
   separately confirmed that exact quote.
 
+For city-based searches, the assistant resolves the city through
+`search_travel(kind="destination", query="Tokyo")`, then uses the returned
+`city_code` to search the requested kind, for example
+`search_travel(kind="hotel", city_code="TYO", query="")`. Text and city filters
+are combined with AND; repeating a city name in `query` can exclude hotels
+whose names do not contain it. The tool schema and assistant instructions
+explain this distinction and prohibit guessing catalog city codes.
+
 The model does **not** receive `start_booking` in its tool list. It cannot
 confirm on a user's behalf or turn conversational text such as “yes” into
 authorization. The authenticated user must call the separate confirmation
@@ -75,7 +83,9 @@ forwards MCP protocol headers and the bearer token.
 
 The AI Gateway uses `DATABASE_URL` for the separate assistant store. Compose
 sets it to PostgreSQL database `assistant`, created by
-`infra/postgres/init/001-databases.sql` for a fresh database volume. For an
+`infra/postgres/init/001-databases.sql` for a fresh database volume. The AI
+Gateway waits for both PostgreSQL and Qdrant healthchecks before starting,
+so table initialization does not race PostgreSQL startup. For an
 existing Phase 6 volume, create that database once before starting the updated
 stack:
 
@@ -87,6 +97,26 @@ OpenAI remains optional for running the rest of the marketplace. The assistant
 requires the user-configured `OPENAI_API_KEY` and a ready Qdrant index. MCP
 search and booking tools use the Compose `SEARCH_URL` and `BOOKING_URL`
 service routes.
+
+### Responses API and reasoning
+
+The assistant uses `/v1/responses` with native function definitions and
+`function_call_output` items linked by `call_id`. Set
+`OPENAI_REASONING_EFFORT=medium` to enable reasoning explicitly on a supported
+model. Leaving it blank preserves the provider's default and supports models
+without reasoning; the default does not guarantee reasoning is enabled.
+Responses use
+`store: false` and request `reasoning.encrypted_content`; all returned output
+items, including encrypted reasoning, are sent back with tool results during
+the current turn. This preserves reasoning context without relying on
+server-side response storage. Encrypted reasoning is not added to the
+conversation database or returned to the frontend.
+
+The output budget is 4096 tokens per model call, including reasoning. Existing
+tool-round, per-round tool-count, and explicit booking-confirmation limits
+remain in effect. Provider HTTP/transport errors and invalid responses,
+including exceptions grouped by the MCP task context, return an explicit 503
+rather than an unhandled 500.
 
 ## Verification and limitations
 

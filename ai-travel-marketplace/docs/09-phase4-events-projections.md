@@ -53,6 +53,10 @@ publishers, and Search. Redpanda is exposed locally on port 19092. The Search
 status endpoint reports the active consumer connection, measured consumer
 lag, processed event/document counts, and dead-letter count.
 
+The Redpanda healthcheck uses `rpk cluster health --exit-when-healthy` against
+the internal Admin API at `localhost:9644`. This command does not accept
+`--brokers` in the pinned Redpanda version.
+
 The event transport and Search process are real Kafka-compatible clients, not
 in-memory mocks. Tests directly exercise the envelope, transactionally stored
 outbox, inbox deduplication, version checks, projection, and rebuild using
