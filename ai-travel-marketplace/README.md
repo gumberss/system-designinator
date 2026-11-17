@@ -37,6 +37,8 @@ repository is being built phase by phase rather than as one large code dump.
 
 ## Read the design and implementation notes
 
+- [Visual system flows: numbered requests, services, and databases](docs/flows.md)
+
 1. [Architecture and service boundaries](docs/01-architecture.md)
 2. [Data ownership and event contracts](docs/02-data-and-events.md)
 3. [Booking Saga, state, and recovery](docs/03-booking-saga.md)
