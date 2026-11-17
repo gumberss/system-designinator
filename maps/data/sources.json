@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "file": "sao-paulo.osm",
+      "source_url": "https://api.openstreetmap.org/api/0.6/map?bbox=-46.658,-23.563,-46.652,-23.557",
+      "license": "ODbL-1.0",
+      "attribution": "OpenStreetMap contributors",
+      "downloaded_on": "2026-11-15",
+      "sha256": "2e0cb8dc7e1af2c03ae371b4352799a81058fa97ce89163f919a1eaf044ba809",
+      "bytes": 2802200,
+      "node_count": 7008,
+      "way_count": 793,
+      "named_feature_count": 325,
+      "note": "Snapshot verified by the XML parser, not yet imported into PostGIS. Future downloads may differ. Full referenced ways extend beyond the requested bbox."
+    }
+  ]
+}

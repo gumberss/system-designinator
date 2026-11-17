@@ -1,0 +1,10 @@
+{
+  "alimentacao": "Refeicoes, restaurantes, entregas de comida e compras de supermercado.",
+  "transporte": "Corridas, transporte publico, combustivel e estacionamento. Entrega de comida nao pertence aqui.",
+  "saude": "Farmacias, consultas, exames e tratamentos de saude.",
+  "moradia": "Aluguel, condominio e contas residenciais de agua, energia e gas.",
+  "lazer": "Cinema, jogos, shows e assinaturas de entretenimento.",
+  "educacao": "Cursos, mensalidades de ensino, livros e material escolar explicitamente identificado.",
+  "outros": "Compra com finalidade identificavel que nao se encaixa nas demais categorias.",
+  "indeterminado": "Descricao insuficiente para inferir a finalidade, como PIX sem contexto ou uma loja que vende muitos tipos de produto. Nao invente o item comprado."
+}

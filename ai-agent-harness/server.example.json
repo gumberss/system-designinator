@@ -1,0 +1,39 @@
+{
+  "oidc": {
+    "issuer": "https://login.example.invalid",
+    "audience": "agent-harness",
+    "jwks_url": "https://login.example.invalid/.well-known/jwks.json"
+  },
+  "models": {
+    "default": {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "input_usd_per_million": "0.15",
+      "output_usd_per_million": "0.60",
+      "capabilities": {
+        "tools": true,
+        "structured_output": true,
+        "context_window_tokens": 128000,
+        "max_output_tokens": 16384,
+        "residency": "global"
+      }
+    }
+  },
+  "limits": {
+    "max_steps": 8,
+    "max_model_calls": 12,
+    "max_output_tokens": 512,
+    "context_window_tokens": 8192,
+    "max_tool_calls": 16,
+    "max_tool_attempts": 24
+  },
+  "retry": {
+    "max_attempts": 3,
+    "base_delay_seconds": 0.5,
+    "max_delay_seconds": 10,
+    "attempt_timeout_seconds": 10
+  },
+  "trusted_hosts": ["localhost", "127.0.0.1"],
+  "tenant_requests_per_minute": 600,
+  "subject_requests_per_minute": 120
+}

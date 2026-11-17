@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Mapinator | Mapas em Python</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="/style.css">
+  <script defer src="https://unpkg.com/maplibre-gl@5.6.1/dist/maplibre-gl.js"></script>
+  <script defer src="/app.js"></script>
+</head>
+<body>
+  <aside>
+    <header><span class="badge">FASES 1–7 · PYTHON</span><h1>Mapinator</h1>
+      <p>Explore o recorte OpenStreetMap importado.</p></header>
+    <form id="search-form">
+      <label for="query">Lugar ou endereço</label>
+      <div class="search-row"><input id="query" minlength="2" maxlength="200" required
+        placeholder="Ex.: Avenida Paulista"><button type="submit">Buscar</button></div>
+    </form>
+    <section aria-labelledby="location-title">
+      <h2 id="location-title">Sua localização</h2>
+      <p>O GPS só será enviado após sua autorização. A posição atual expira em
+        5 minutos; o trânsito opcional tem retenção separada.</p>
+      <label><input id="traffic-consent" type="checkbox">
+        Estou em um carro e autorizo contribuir para o trânsito enquanto o GPS estiver ativo.</label>
+      <p>A contribuição é opcional: retenção nominal de GPS bruto de 1h no banco
+        e 15min no broker. Falhas/backups podem prolongar a retenção.
+        Velocidades agregadas não garantem anonimato.</p>
+      <output id="traffic-status">Contribuição de trânsito desativada.</output>
+      <div class="actions"><button id="track" type="button">Ativar localização</button>
+        <button id="stop" type="button" disabled>Desativar e apagar</button></div>
+      <output id="coordinates">Rastreamento desativado.</output>
+    </section>
+    <section aria-labelledby="route-title">
+      <h2 id="route-title">Planejar rota</h2>
+      <p>Coordenadas no formato latitude, longitude ou nome único do recorte.
+        ETA usa trânsito com dados suficientes ou histórico/baseline. Não use como navegação certificada.</p>
+      <form id="route-form">
+        <label for="source">Origem</label>
+        <input id="source" required placeholder="-23.56, -46.65">
+        <button id="gps-source" type="button">Usar posição atual</button>
+        <label for="destination">Destino</label>
+        <input id="destination" required placeholder="Nome ou latitude, longitude">
+        <div class="actions">
+          <select id="mode" aria-label="Transporte">
+            <option value="car">Carro</option><option value="bicycle">Bicicleta</option>
+            <option value="walking">A pé</option>
+          </select>
+          <select id="strategy" aria-label="Otimização">
+            <option value="fastest">Mais rápida</option><option value="shortest">Mais curta</option>
+          </select>
+        </div>
+        <label><input id="avoid-tolls" type="checkbox"> Evitar pedágios</label>
+        <label><input id="avoid-motorways" type="checkbox"> Evitar rodovias expressas</label>
+        <button id="calculate-route" type="submit">Calcular rota e alternativas</button>
+      </form>
+      <select id="route-choice" aria-label="Alternativa de rota" hidden></select>
+      <output id="route-summary"></output>
+      <button id="traffic-map" type="button">Ver trânsito nos segmentos da rota</button>
+      <p>Camada estimada, consulta manual: verde = livre, laranja = reduzido, vermelho = lento.
+        Sem dados suficientes, não colore as vias. Recalcule para atualizar a ETA.</p>
+      <ol id="instructions"></ol>
+      <button id="navigate" type="button">Iniciar navegação experimental</button>
+      <output id="navigation-status">Ative o GPS e calcule uma rota antes de navegar.</output>
+    </section>
+    <section aria-labelledby="ev-title">
+      <h2 id="ev-title">Planejamento EV</h2>
+      <p>Use coordenadas de origem/destino acima. Preferências da rota comum não
+        se aplicam ao plano EV. Consumo/carga são estimativas, sem garantia de autonomia ou vaga.</p>
+      <form id="ev-form">
+        <label><input id="ev-profile" type="checkbox"> Usar meu perfil informado</label>
+        <label for="ev-capacity">Capacidade (kWh)</label><input id="ev-capacity" type="number" min="1" step="any">
+        <label for="ev-soc">Carga inicial (%)</label><input id="ev-soc" type="number" min="0" max="100" step="any">
+        <label for="ev-reserve">Reserva (%)</label><input id="ev-reserve" type="number" min="0" max="99" step="any">
+        <label for="ev-consumption">Consumo informado (kWh/100km)</label><input id="ev-consumption" type="number" min="0.1" step="any">
+        <label for="ev-power">Potência máxima de carga (kW)</label><input id="ev-power" type="number" min="0.1" step="any">
+        <label for="ev-connectors">Conectores OSM, separados por vírgula</label>
+        <input id="ev-connectors" maxlength="200" placeholder="type2_combo,type2">
+        <button id="ev-plan" type="submit">Planejar viagem EV</button>
+      </form>
+      <output id="ev-summary">Sem perfil, retorna rota comum explicitamente; não inventa bateria.</output>
+      <ol id="ev-stops"></ol>
+    </section>
+    <section aria-labelledby="places-title">
+      <h2 id="places-title">Lugares e conversa local</h2>
+      <output id="llm-state">Modelo local opcional; sem resposta simulada.</output>
+      <form id="places-form">
+        <label for="places-center">Centro (latitude, longitude)</label>
+        <input id="places-center" placeholder="Se vazio, usa a origem da rota">
+        <label for="places-query">Nome ou endereço</label><input id="places-query" maxlength="200">
+        <label for="places-categories">Categorias OSM, separadas por vírgula</label>
+        <input id="places-categories" maxlength="200" placeholder="cafe,restaurant,library">
+        <label for="places-radius">Raio (metros)</label>
+        <input id="places-radius" type="number" min="1" max="50000" value="1000" required>
+        <label><input id="places-open" type="checkbox"> Apenas aberto agora, com horário verificado</label>
+        <label><input id="places-wifi" type="checkbox"> Apenas Wi-Fi verificado no OSM</label>
+        <button id="places-find" type="submit">Buscar lugares sem IA</button>
+      </form>
+      <form id="conversation-form">
+        <label for="conversation-message">Pedido ou refinamento</label>
+        <textarea id="conversation-message" maxlength="2000" required></textarea>
+        <label><input id="conversation-consent" type="checkbox" required>
+          Autorizo interpretar esta mensagem no modelo local configurado.</label>
+        <button id="conversation-send" type="submit">Conversar com modelo local</button>
+        <button id="conversation-reset" type="button">Nova conversa</button>
+      </form>
+      <output id="places-summary">Atributos desconhecidos não são tratados como verificados.</output>
+      <ul id="places-results"></ul>
+      <button id="places-more" type="button" hidden>Mais lugares</button>
+    </section>
+    <p id="status" role="status" aria-live="polite">Carregando…</p>
+    <ul id="results"></ul>
+    <button id="more" type="button" hidden>Mais resultados</button>
+    <footer><p id="dataset">Nenhum dataset carregado.</p>
+      <p>Laboratório regional: não use como navegação certificada.
+        Dependências opcionais indisponíveis geram aviso, não dados inventados.</p>
+      <a href="/docs" target="_blank" rel="noopener">Contratos da API</a></footer>
+  </aside>
+  <main><div id="map" aria-label="Mapa interativo"></div>
+    <div id="map-notice">Sem tiles externos: mostrando geometrias OSM locais.</div></main>
+</body>
+</html>

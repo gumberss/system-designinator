@@ -1,0 +1,113 @@
+name: mapinator
+services:
+  db:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_DB: mapinator
+      POSTGRES_USER: mapinator
+      POSTGRES_PASSWORD: ${MAPINATOR_DB_PASSWORD:?Set MAPINATOR_DB_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:58432:5432"
+    volumes:
+      - mapinator-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mapinator -d mapinator"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+  api:
+    build: .
+    environment:
+      MAPINATOR_DATABASE_URL: postgresql+psycopg://mapinator:${MAPINATOR_DB_PASSWORD}@db:5432/mapinator
+      MAPINATOR_ALLOWED_ORIGINS: ${MAPINATOR_ALLOWED_ORIGINS:-http://127.0.0.1:58180,http://localhost:58180}
+      MAPINATOR_COOKIE_SECURE: ${MAPINATOR_COOKIE_SECURE:-false}
+      MAPINATOR_MAP_STYLE_URL: ${MAPINATOR_MAP_STYLE_URL:-}
+      MAPINATOR_REDIS_URL: redis://:${MAPINATOR_DB_PASSWORD}@redis:6379/0
+      MAPINATOR_LLM_BASE_URL: ${MAPINATOR_LLM_BASE_URL:-http://host.docker.internal:11434}
+      MAPINATOR_LLM_MODEL: ${MAPINATOR_LLM_MODEL:-}
+    ports:
+      - "127.0.0.1:58180:58180"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["mapinator", "serve", "--host", "0.0.0.0", "--port", "58180"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:58180/health/ready', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+  broker:
+    profiles: ["traffic"]
+    image: redpandadata/redpanda:v24.3.18
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container
+      - --smp=1
+      - --memory=512M
+      - --reserve-memory=0M
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://broker:9092,external://127.0.0.1:59092
+      - --set=redpanda.log_cleanup_policy=delete
+    ports:
+      - "127.0.0.1:59092:19092"
+    volumes:
+      - mapinator-redpanda:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health", "--exit-when-healthy"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  redis:
+    profiles: ["navigation"]
+    image: redis:7.4-alpine
+    command: ["redis-server","--requirepass","${MAPINATOR_DB_PASSWORD}","--save","","--appendonly","no"]
+    ports:
+      - "127.0.0.1:56379:6379"
+    environment:
+      REDISCLI_AUTH: ${MAPINATOR_DB_PASSWORD}
+    healthcheck:
+      test: ["CMD","redis-cli","ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+  traffic-init:
+    profiles: ["traffic"]
+    build: .
+    environment:
+      MAPINATOR_KAFKA_BOOTSTRAP_SERVERS: broker:9092
+    command: ["mapinator", "init-traffic"]
+    depends_on:
+      broker:
+        condition: service_healthy
+  traffic-relay:
+    profiles: ["traffic"]
+    build: .
+    environment:
+      MAPINATOR_DATABASE_URL: postgresql+psycopg://mapinator:${MAPINATOR_DB_PASSWORD}@db:5432/mapinator
+      MAPINATOR_KAFKA_BOOTSTRAP_SERVERS: broker:9092
+    command: ["mapinator", "traffic-worker", "--role", "relay"]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      traffic-init:
+        condition: service_completed_successfully
+  traffic-analytics:
+    profiles: ["traffic"]
+    build: .
+    environment:
+      MAPINATOR_DATABASE_URL: postgresql+psycopg://mapinator:${MAPINATOR_DB_PASSWORD}@db:5432/mapinator
+      MAPINATOR_KAFKA_BOOTSTRAP_SERVERS: broker:9092
+    command: ["mapinator", "traffic-worker", "--role", "analytics"]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      traffic-init:
+        condition: service_completed_successfully
+volumes:
+  mapinator-postgres:
+  mapinator-redpanda:

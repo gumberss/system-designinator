@@ -1,0 +1,168 @@
+version: '3.8'
+
+services:
+  # PostgreSQL - Primary transactional database
+  postgres:
+    image: postgres:16-alpine
+    container_name: aiuber-postgres
+    environment:
+      POSTGRES_DB: aiuber_db
+      POSTGRES_USER: aiuber_user
+      POSTGRES_PASSWORD: aiuber_password
+      POSTGRES_INITDB_ARGS: "-c max_connections=1000"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aiuber_user -d aiuber_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aiuber-network
+
+  # Redis - Caching, location indexing, real-time matching
+  redis:
+    image: redis:7-alpine
+    container_name: aiuber-redis
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aiuber-network
+
+  # Redpanda - Message queue (Kafka-compatible)
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    container_name: aiuber-redpanda
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:29092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:29092
+      - --schema-registry-addr=0.0.0.0:8081
+      - --rpc-addr 0.0.0.0:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --mode dev-container
+      - --default-log-level=info
+    ports:
+      - "8081:8081"      # Schema Registry
+      - "9092:9092"      # Kafka internal
+      - "29092:29092"    # Kafka external (localhost)
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aiuber-network
+
+  # Redpanda Console - Web UI for Kafka/Redpanda
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:latest
+    container_name: aiuber-redpanda-console
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      SCHEMA_REGISTRY_URL: http://redpanda:8081
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redpanda
+    networks:
+      - aiuber-network
+
+  # Jaeger - Distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: aiuber-jaeger
+    environment:
+      COLLECTOR_ZIPKIN_HOST_PORT: :9411
+    ports:
+      - "5775:5775/udp"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"
+      - "14250:14250"
+      - "9411:9411"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:14268/metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aiuber-network
+
+  # Prometheus - Metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: aiuber-prometheus
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+    ports:
+      - "9090:9090"
+    depends_on:
+      - jaeger
+    networks:
+      - aiuber-network
+
+  # Grafana - Metrics visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: aiuber-grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./infra/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    networks:
+      - aiuber-network
+
+  # pgAdmin - PostgreSQL administration
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: aiuber-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@aiuber.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - aiuber-network
+
+networks:
+  aiuber-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

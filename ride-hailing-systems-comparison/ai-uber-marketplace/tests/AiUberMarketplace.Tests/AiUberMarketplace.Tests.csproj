@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.9.0" />
+    <PackageReference Include="xunit" Version="2.6.6" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.6">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Moq" Version="4.20.70" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/AiUberMarketplace.Domain/AiUberMarketplace.Domain.csproj" />
+    <ProjectReference Include="../../src/AiUberMarketplace.Application/AiUberMarketplace.Application.csproj" />
+    <ProjectReference Include="../../src/AiUberMarketplace.Infrastructure/AiUberMarketplace.Infrastructure.csproj" />
+    <ProjectReference Include="../../src/AiUberMarketplace.Api/AiUberMarketplace.Api.csproj" />
+  </ItemGroup>
+
+</Project>
